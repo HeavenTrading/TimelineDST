@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Timeline DST — New York vs London (updatable, yearly)</title>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <style>
+    :root{
+      --text:#0f172a; --muted:#334155; --bg:#f8fafc;
+      --ok:rgba(34,197,94,.25); --warn:#facc15; --avoid:#ef4444; --std:rgba(59,130,246,.12);
+    }
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
+    .wrap{max-width:1200px; margin:auto; padding:18px}
+    h1{font-size:clamp(24px,3.2vw,36px); margin:.2rem 0 .6rem}
+    .sub{color:var(--muted)}
+    .toolbar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:.8rem 0}
+    .toolbar input{padding:.45rem .6rem; border:1px solid #cbd5e1; border-radius:.6rem; width:110px}
+    .toolbar button{padding:.5rem .8rem; border:1px solid #cbd5e1; background:#fff; border-radius:.6rem; cursor:pointer}
+    .note{display:flex; flex-wrap:wrap; gap:10px; padding:12px; border:1px dashed #cbd5e1; border-radius:12px; background:#fff}
+    .note b{color:#0b3a86}
+    #chart{width:100%; max-width:1400px; margin:12px auto}
+    details{background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 12px}
+    details summary{cursor:pointer; font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🕒 Timeline DST — New York & London</h1>
+    <p class="sub">Real-time updatable ("Today" line) and year selectable.</p>
+    <div class="note">
+      <div>📢 <b>Daylight Saving Time Transition</b> (March & Autumn)</div>
+      <div>🚨 Markets are <b>NOT</b> synchronized during transition windows.</div>
+      <div>
+        🔹 <b>New York</b> switches to daylight saving on <u>the second Sunday in March</u>.<br/>
+        🔹 <b>London</b> switches to daylight saving on <u>the last Sunday in March</u>.<br/>
+        🍂 In Autumn: <b>London</b> returns to standard time on <u>the last Sunday in October</u>, and <b>New York</b> on <u>the first Sunday in November</u>.
+      </div>
+    </div>
+    <div class="toolbar">
+      <label for="year"><b>Year:</b></label>
+      <input id="year" type="number" min="2000" max="2100" />
+      <button id="renderBtn">Render / Refresh</button>
+      <span class="sub">The <b style="color:#1f77b4">Today</b> line updates automatically.</span>
+    </div>
+    <div id="chart" aria-label="DST timeline chart"></div>
+    <details>
+      <summary>📌 Recommendations & MT4 Adjustments</summary>
+      <ul>
+        <li>✅ Ideally: <b>avoid trading</b> in transition period.</li>
+        <li>✅ <b>Check your MT4 server time</b>. Many brokers follow New York time ⇒ London open/close shifts temporarily.</li>
+        <li>✅ If your strategy is anchored on London: add <b>+1h</b> during the March transition, then revert to summer settings after synchronization.</li>
+        <li>⚠️ Maintaining correct synchronization is crucial for consistent results.</li>
+      </ul>
+    </details>
+  </div>
+<script>
+(function(){
+  const MS = 24*60*60*1000;
+  const dUTC = (y,m,d)=> new Date(Date.UTC(y, m-1, d));
+  const ymd = d => d.toISOString().slice(0,10);
+  function nthWeekdayOfMonth(year, month, weekday, n){
+    const first = dUTC(year, month, 1);
+    const delta = ((weekday - first.getUTCDay() + 7) % 7) + (n-1)*7;
+    return new Date(first.getTime() + delta*MS);
+  }
+  function lastWeekdayOfMonth(year, month, weekday){
+    const firstNext = (month===12) ? dUTC(year+1,1,1) : dUTC(year,month+1,1);
+    const last = new Date(firstNext.getTime() - MS);
+    const delta = (last.getUTCDay() - weekday + 7) % 7;
+    return new Date(last.getTime() - delta*MS);
+  }
+  function dstWindows(year){
+    const nySpring = nthWeekdayOfMonth(year, 3, 0, 2);
+    const ldnSpring = lastWeekdayOfMonth(year, 3, 0);
+    const ldnFall = lastWeekdayOfMonth(year, 10, 0);
+    const nyFall  = nthWeekdayOfMonth(year, 11, 0, 1);
+    return {nySpring, ldnSpring, ldnFall, nyFall};
+  }
+  function midMonthMarkers(year){
+    const xs=[], ys=[], txt=[];
+    for(let m=1; m<=12; m++){
+      [1,15].forEach(d=>{
+        const lastDay = new Date(Date.UTC(year, m, 0)).getUTCDate();
+        if(d <= lastDay){
+          xs.push(ymd(dUTC(year, m, d)));
+          ys.push(-0.45);
+          txt.push(`${d}/${m}`);
+        }
+      })
+    }
+    return {x: xs,y: ys,text: txt,mode: "markers+text",type: "scatter",marker: { size: 5, color: "rgba(0,0,0,.35)" },textposition: "bottom center",textfont: { size: 8 },hoverinfo: "skip",showlegend: false};
+  }
+  function buildFigure(year){
+    const {nySpring, ldnSpring, ldnFall, nyFall} = dstWindows(year);
+    const yearStart = dUTC(year, 1, 1);
+    const yearEnd   = dUTC(year, 12, 31);
+    const shapes = [];
+    const annotations = [];
+    const BALLOON_Y = 0.6;
+    const BALLOON_AY = -40;
+    shapes.push({type: "line", x0: ymd(yearStart), x1: ymd(yearEnd), y0: 0, y1: 0,line: { color: "black", width: 3 }});
+    shapes.push({type: "rect", x0: ymd(yearStart), x1: ymd(yearEnd), y0: -0.25, y1: 0.25,fillcolor: getComputedStyle(document.documentElement).getPropertyValue('--ok').trim() || "rgba(34,197,94,.25)",line: { color: "black", width: 1 }});
+    const avoid = [
+      { label: "DST Transition — NY→LDN (March)",   start: nySpring, end: ldnSpring },
+      { label: "DST Transition — LDN→NY (Oct–Nov)", start: ldnFall,  end: nyFall }
+    ];
+    avoid.forEach(a=>{
+      shapes.push({ type: "rect", x0: ymd(a.start), x1: ymd(a.end), y0: -0.25, y1: 0.25, fillcolor: "#ef4444", line: { color: "black", width: 1 } });
+      const xm = new Date((a.start.getTime() + a.end.getTime()) / 2);
+      annotations.push({x: ymd(xm), y: 0.95, xref: "x", yref: "y",text: `${a.label}<br>${a.start.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})} → ${a.end.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}`,showarrow: true, arrowhead: 2, ax: 0, ay: -50,bgcolor: "#ef4444", bordercolor: "black",font: { size: 14, color: "#000" }, align: "center"});
+    });
+    const summerStart = ldnSpring;
+    const summerEnd   = ldnFall;
+    const summerMid   = new Date((summerStart.getTime() + summerEnd.getTime())/2);
+    shapes.push({ type:"rect", x0: ymd(summerStart), x1: ymd(summerEnd), y0: 0.28, y1: 0.42, fillcolor: "rgba(34,197,94,.18)", line:{color:"rgba(34,197,94,.6)", width:1} });
+    annotations.push({x: ymd(summerMid), y: BALLOON_Y, xref: "x", yref: "y",text: "🌞 <b>Use Summer DST</b><br><span style=\"font-size:11px\">(LDN & NY on daylight saving)</span>",showarrow: true, arrowhead: 2, ax: 0, ay: BALLOON_AY,bgcolor: "#d1fae5", bordercolor: "#059669", borderwidth: 1,font: { size: 13, color: "#065f46" }, align: "center"});
+    const winter1Start = yearStart, winter1End = nySpring;
+    const winter2Start = nyFall,    winter2End = yearEnd;
+    const winter1Mid = new Date((winter1Start.getTime()+winter1End.getTime())/2);
+    const winter2Mid = new Date((winter2Start.getTime()+winter2End.getTime())/2);
+    shapes.push({ type:"rect", x0: ymd(winter1Start), x1: ymd(winter1End), y0: 0.28, y1: 0.42, fillcolor: "var(--std)", line:{color:"rgba(59,130,246,.35)", width:1} });
+    shapes.push({ type:"rect", x0: ymd(winter2Start), x1: ymd(winter2End), y0: 0.28, y1: 0.42, fillcolor: "var(--std)", line:{color:"rgba(59,130,246,.35)", width:1} });
+    const stdAnno = {showarrow: true, arrowhead: 2, ax: 0, ay: BALLOON_AY,bgcolor: "#dbeafe", bordercolor: "#2563eb", borderwidth: 1,font: { size: 13, color: "#1e3a8a" }, align: "center"};
+    annotations.push({ x: ymd(winter1Mid), y: BALLOON_Y, xref:"x", yref:"y", text: "❄️ <b>Use Standard UTC</b><br><span style=\"font-size:11px\">(Check Use Guide)</span>", ...stdAnno });
+    annotations.push({ x: ymd(winter2Mid), y: BALLOON_Y, xref:"x", yref:"y", text: "❄️ <b>Use Standard UTC</b><br><span style=\"font-size:11px\">(Check Use Guide)</span>", ...stdAnno });
+    const today = new Date();
+    shapes.push({ type: "line", x0: today, x1: today, y0: -0.9, y1: 2.0, line: { color: "#1f77b4", width: 3 } });
+    annotations.push({x: today, y: -0.8, xref: "x", yref: "y",text: `Today<br>${today.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}`,showarrow: false,font: { size: 13, color: "#1f77b4" },bgcolor: "#fff", bordercolor: "#1f77b4", borderwidth: 1,yanchor: "top"});
+    avoid.forEach(a=>{
+      annotations.push({ x: ymd(a.start), y: 0.5, xref: "x", yref: "y", text: a.start.toLocaleDateString('en-GB',{day:'2-digit',month:'short'}), showarrow: false, textangle: -90, font: { size: 11, family: "Arial Black, Arial, sans-serif", color: "#000" } });
+      annotations.push({ x: ymd(a.end),   y: 0.5, xref: "x", yref: "y", text: a.end.toLocaleDateString('en-GB',{day:'2-digit',month:'short'}),   showarrow: false, textangle: -90, font: { size: 11, family: "Arial Black, Arial, sans-serif", color: "#000" } });
+    });
+    const data = [midMonthMarkers(year),{ x:[ymd(yearStart), ymd(yearEnd)], y:[0,0], mode:"lines", line:{width:0}, hoverinfo:"skip", showlegend:false }];
+    const layout = {title: { text: `Trading periods vs DST windows — ${year}`, font: { size: 20 } },margin: { l: 40, r: 20, t: 60, b: 50 },xaxis: { type: "date", tickformat: "%b", dtick: "M1", showgrid: true, gridcolor: "rgba(0,0,0,.15)" },yaxis: { range: [-0.9, 1.8], visible: false },shapes, annotations,showlegend: false};
+    return { data, layout };
+  }
+  let todayShapeIndex = null;
+  function render(year){
+    const fig = buildFigure(year);
+    todayShapeIndex = fig.layout.shapes.length - 1;
+    Plotly.newPlot('chart', fig.data, fig.layout, { displayModeBar: true, responsive: true });
+    updateToday();
+    if(window._todayTimer) clearInterval(window._todayTimer);
+    window._todayTimer = setInterval(updateToday, 60*1000);
+  }
+  function updateToday(){
+    const now = new Date();
+    const relayout = {};
+    relayout[`shapes[${todayShapeIndex}].x0`] = now;
+    relayout[`shapes[${todayShapeIndex}].x1`] = now;
+    Plotly.relayout('chart', relayout);
+  }
+  const yearInput = document.getElementById('year');
+  yearInput.value = new Date().getFullYear();
+  document.getElementById('renderBtn').addEventListener('click', () => {
+    const y = +yearInput.value;
+    if(Number.isFinite(y) && y >= 2000 && y <= 2100){render(y);} else {yearInput.value = new Date().getFullYear();render(+yearInput.value);}
+  });
+  render(+yearInput.value);
+})();
+</script>
+</body>
+</html>
